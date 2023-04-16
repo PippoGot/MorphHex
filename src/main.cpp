@@ -27,9 +27,17 @@ extern "C" void app_main(void) {
 
     while (true) {
         for (int i = 0; i < 15; i++) {
-            uint16_t ms = (i + 7) * 100;
-            device.write_microseconds(PCA9685::CHANNEL_0, ms);
+            uint16_t us = (i + 7) * 100;
+            device.write_microseconds(PCA9685::CHANNEL_00, us);
             vTaskDelay(pdMS_TO_TICKS(1000));
+            uint8_t ps = device.read_prescale();
+            printf("Prescale value = %u \n", ps);
+            float duty = device.get_duty_cycle(PCA9685::CHANNEL_00);
+            printf("Duty cycle value = %.2f for channel 0\n", duty);
+            device.write_microseconds(PCA9685::CHANNEL_00, 700);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            device.set_duty_cycle(PCA9685::CHANNEL_00, duty);
+            vTaskDelay(pdMS_TO_TICKS(500));
         }
     }
 
