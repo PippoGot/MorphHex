@@ -1,46 +1,90 @@
-// FreeRTOS includes
+// Main class and config
+#include <config.h>
+#include <main.h>
+
+// FreeRTOS includes and iostream
+#include <iostream>
+
 #include "freertos/freertos.h"
 #include "freertos/task.h"
 
-// I2C driver
-#include "I2C.h"
-#define pdSECOND pdMS_TO_TICKS(1000)
+// GPIO
+#include "driver/gpio.h"            // Module
+#define INC_BUTTON_PIN GPIO_NUM_34  // Button pin for incrementing pulse length
+#define DEC_BUTTON_PIN GPIO_NUM_33  // Button pin for decrementing pulse length
+uint16_t pulse_length = 120;        // Initial pulse length
 
-// Error library
-#include "esp_err.h"
+// Testing
+#include <kinematics.h>
 
-// Device library and settings
-#include "PCA9685.h"
-#define PCA9685_ADDR 0x40
-#define SDA_PIN GPIO_NUM_21
-#define SCL_PIN GPIO_NUM_22
+const float coxa_length = 60.5;
+const float femur_length = 100.0;
+const float tibia_length = 150.0;
+ForwardKinematics fk = ForwardKinematics(coxa_length, femur_length, tibia_length);
 
-// Main function
-extern "C" void app_main(void) {
-    I2C_Bus_t& myI2C = I2C_B0;  // i2c0 and i2c1 are the default objects
-    ESP_ERROR_CHECK(myI2C.begin(GPIO_NUM_21, GPIO_NUM_22));
-    myI2C.scanner();
+// Servo tuning function
+void servo_tune_setup() {
+    // I2C bus and servo driver
+    ESP_ERROR_CHECK(I2C_bus.begin(SDA_PIN, SCL_PIN));
+    servo_driver.begin();
+    servo_driver.set_PWM_freq(48.828125);
 
-    PCA9685 device = PCA9685(PCA9685_ADDR, myI2C);
-    device.begin();
-    device.set_PWM_freq(50);
+    // GPIO input
+    gpio_set_direction(INC_BUTTON_PIN, GPIO_MODE_INPUT);
+    gpio_set_direction(DEC_BUTTON_PIN, GPIO_MODE_INPUT);
 
-    while (true) {
-        for (int i = 0; i < 15; i++) {
-            uint16_t us = (i + 7) * 100;
-            device.write_microseconds(PCA9685::CHANNEL_00, us);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            uint8_t ps = device.read_prescale();
-            printf("Prescale value = %u \n", ps);
-            float duty = device.get_duty_cycle(PCA9685::CHANNEL_00);
-            printf("Duty cycle value = %.2f for channel 0\n", duty);
-            device.write_microseconds(PCA9685::CHANNEL_00, 700);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            device.set_duty_cycle(PCA9685::CHANNEL_00, duty);
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
+    // set the servo to a specific value until button is pressed
+    servo_driver.set_pulse_length(PCA9685::CHANNEL_00, pulse_length);
+    while (gpio_get_level(INC_BUTTON_PIN) == 0) {
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    myI2C.close();
-    vTaskDelay(portMAX_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+void servo_tune_loop() {
+    if (gpio_get_level(INC_BUTTON_PIN) == 1) {
+        vTaskDelay(pdMS_TO_TICKS(10));  // Debounce
+        pulse_length++;
+        printf("pulse length = %d\n", pulse_length);
+    }
+
+    if (gpio_get_level(DEC_BUTTON_PIN) == 1) {
+        vTaskDelay(pdMS_TO_TICKS(10));  // Debounce
+        pulse_length--;
+        printf("pulse length = %d\n", pulse_length);
+    }
+
+    servo_driver.set_pulse_length(PCA9685::CHANNEL_00, pulse_length);
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+// Main functions
+void Main::setup(void) {
+    servo_tune_setup();
+
+    Eigen::Vector3f configuration = Eigen::Vector3f(0, 30, 0);
+    std::cout << fk.evaluate(configuration) << std::endl;
+}
+
+void Main::loop(void) {
+    // servo_tune_loop();
+    servo1.set_position(0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    servo2.set_position(0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    servo3.set_position(0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+extern "C" void app_main(void) {
+    Main main = Main();
+    main.setup();
+
+    while (true) {
+        main.loop();
+        // servo3.test_sweep();
+        // servo1.set_position(90);
+    }
 }
